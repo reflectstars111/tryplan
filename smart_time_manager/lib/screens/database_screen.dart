@@ -18,6 +18,9 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      setState(() {});
+    });
   }
 
   @override
@@ -68,21 +71,19 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_tabController.index == 1) {
-            _showAddHabitDialog(context, ref);
-          } else if (_tabController.index == 2) {
-            _showAddCountdownDialog(context, ref);
-          } else {
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('只能在长期计划或倒计时页面添加')),
-             );
-          }
-        },
-        tooltip: '添加',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: _tabController.index == 0 
+          ? null 
+          : FloatingActionButton(
+              onPressed: () {
+                if (_tabController.index == 1) {
+                  _showAddHabitDialog(context, ref);
+                } else if (_tabController.index == 2) {
+                  _showAddCountdownDialog(context, ref);
+                }
+              },
+              tooltip: '添加',
+              child: const Icon(Icons.add),
+            ),
     );
   }
 
@@ -208,81 +209,246 @@ class _DatabaseScreenState extends ConsumerState<DatabaseScreen> with SingleTick
   }
 }
 
+class _HabitCheckinRecord {
+  final PlanEvent event;
+  final DateTime date;
+  _HabitCheckinRecord(this.event, this.date);
+}
+
 class _CompletedTasksList extends ConsumerWidget {
   const _CompletedTasksList();
+
+  int _getQuadrantPriority(PlanEvent event) {
+    if (event.isImportant && event.isUrgent) return 0; // Red
+    if (event.isImportant && !event.isUrgent) return 1; // Blue
+    if (!event.isImportant && event.isUrgent) return 2; // Yellow
+    return 3; // Gray
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final allEvents = ref.watch(planEventsProvider);
-    // Filter completed tasks that are NOT habits
-    final completedEvents = allEvents
+    
+    // Get normal completed tasks
+    final completedNormalEvents = allEvents
         .where((e) => e.isCompleted && !e.isHabit)
         .toList();
-    
-    // Sort by completion time (if we had it) or creation time (id usually time-based UUID, but not guaranteed)
-    // For now, reverse order to show newest added first
-    final reversedList = completedEvents.reversed.toList();
+        
+    // Get habit check-ins
+    // We treat each checked-in date of a habit as a separate "completed event" for this list
+    final habitCheckinEvents = <_HabitCheckinRecord>[];
+    for (var event in allEvents.where((e) => e.isHabit && e.streakDates != null && e.streakDates!.isNotEmpty)) {
+      for (var date in event.streakDates!) {
+        habitCheckinEvents.add(_HabitCheckinRecord(event, date));
+      }
+    }
 
-    if (reversedList.isEmpty) {
+    if (completedNormalEvents.isEmpty && habitCheckinEvents.isEmpty) {
       return const Center(child: Text('暂无已完成的任务'));
     }
 
+    // Group by date
+    final groupedEvents = <DateTime, List<dynamic>>{}; // Mix of PlanEvent and _HabitCheckinRecord
+    
+    // Add normal events
+    for (var event in completedNormalEvents) {
+      final dateProxy = event.startTime ?? DateTime.now();
+      final dateKey = DateTime(dateProxy.year, dateProxy.month, dateProxy.day);
+      
+      if (!groupedEvents.containsKey(dateKey)) {
+        groupedEvents[dateKey] = [];
+      }
+      groupedEvents[dateKey]!.add(event);
+    }
+    
+    // Add habit check-ins
+    for (var record in habitCheckinEvents) {
+      final dateKey = DateTime(record.date.year, record.date.month, record.date.day);
+      if (!groupedEvents.containsKey(dateKey)) {
+        groupedEvents[dateKey] = [];
+      }
+      groupedEvents[dateKey]!.add(record);
+    }
+
+    // Sort dates descending (newest first)
+    final sortedDates = groupedEvents.keys.toList()..sort((a, b) => b.compareTo(a));
+
     return ListView.builder(
-      itemCount: reversedList.length,
-      itemBuilder: (context, index) {
-        final event = reversedList[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            leading: const Icon(Icons.check_circle, color: Colors.green),
-            title: Text(
-              event.title,
-              style: const TextStyle(decoration: TextDecoration.lineThrough),
-            ),
-            subtitle: event.startTime != null 
-                ? Text('时间: ${DateFormat('MM-dd HH:mm').format(event.startTime!)}')
-                : null,
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.restore, color: Colors.blue),
-                  tooltip: '还原任务',
-                  onPressed: () {
-                    // Toggle complete back to false to restore it to active tasks
-                    ref.read(planEventsProvider.notifier).toggleComplete(event);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已还原到任务列表')),
-                    );
-                  },
+      itemCount: sortedDates.length,
+      itemBuilder: (context, dateIndex) {
+        final date = sortedDates[dateIndex];
+        final eventsForDate = groupedEvents[date]!;
+
+        // Sort events within the date
+        eventsForDate.sort((aDynamic, bDynamic) {
+          final a = aDynamic is PlanEvent ? aDynamic : (aDynamic as _HabitCheckinRecord).event;
+          final b = bDynamic is PlanEvent ? bDynamic : (bDynamic as _HabitCheckinRecord).event;
+          
+          // 1. Sort by Quadrant (Red -> Blue -> Yellow -> Gray)
+          final priorityA = _getQuadrantPriority(a);
+          final priorityB = _getQuadrantPriority(b);
+          if (priorityA != priorityB) {
+            return priorityA.compareTo(priorityB);
+          }
+          
+          // 2. Sort by time (earliest first)
+          final timeA = aDynamic is PlanEvent 
+              ? (a.startTime ?? DateTime(date.year, date.month, date.day))
+              : (aDynamic as _HabitCheckinRecord).date;
+          final timeB = bDynamic is PlanEvent 
+              ? (b.startTime ?? DateTime(date.year, date.month, date.day))
+              : (bDynamic as _HabitCheckinRecord).date;
+          return timeA.compareTo(timeB);
+        });
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+              child: Text(
+                DateFormat('yyyy年MM月dd日').format(date),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  tooltip: '永久删除',
-                  onPressed: () {
-                    // Confirm delete
-                    showDialog(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('删除记录'),
-                        content: const Text('确定要永久删除这条已完成的记录吗？'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-                          TextButton(
-                            onPressed: () {
-                              ref.read(planEventsProvider.notifier).deleteEvent(event);
-                              Navigator.pop(ctx);
-                            },
-                            child: const Text('删除'),
+              ),
+            ),
+            ...eventsForDate.map((item) {
+              final isHabitCheckin = item is _HabitCheckinRecord;
+              final event = isHabitCheckin ? item.event : (item as PlanEvent);
+              
+              // Determine the quadrant color
+              Color quadrantColor;
+              if (event.isImportant && event.isUrgent) {
+                quadrantColor = Colors.red;
+              } else if (event.isImportant && !event.isUrgent) {
+                quadrantColor = Colors.blue;
+              } else if (!event.isImportant && event.isUrgent) {
+                quadrantColor = Colors.yellow.shade700;
+              } else {
+                quadrantColor = Colors.grey;
+              }
+
+              String timeRangeStr = '';
+              if (!isHabitCheckin && event.startTime != null) {
+                final startStr = DateFormat('MM-dd HH:mm').format(event.startTime!);
+                if (event.endTime != null) {
+                  final endStr = DateFormat('HH:mm').format(event.endTime!);
+                  timeRangeStr = '$startStr - $endStr';
+                } else {
+                  timeRangeStr = startStr;
+                }
+              }
+
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                clipBehavior: Clip.antiAlias,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: quadrantColor,
+                        width: 6,
+                      ),
+                    ),
+                  ),
+                  child: ListTile(
+                    leading: Icon(
+                      isHabitCheckin ? Icons.loop : Icons.check_circle, 
+                      color: isHabitCheckin ? Theme.of(context).colorScheme.secondary : Colors.green,
+                    ),
+                    title: RichText(
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: event.title,
+                            style: TextStyle(
+                              decoration: TextDecoration.lineThrough,
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 16,
+                            ),
                           ),
+                          if (timeRangeStr.isNotEmpty)
+                            TextSpan(
+                              text: '  ($timeRangeStr)',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                                fontSize: 12,
+                                decoration: TextDecoration.none,
+                              ),
+                            ),
+                          if (isHabitCheckin)
+                            TextSpan(
+                              text: '  (打卡)',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.8),
+                                fontSize: 12,
+                                decoration: TextDecoration.none,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                         ],
                       ),
-                    );
-                  },
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.restore, color: Colors.blue),
+                          tooltip: isHabitCheckin ? '撤销今日打卡' : '还原任务',
+                          onPressed: () {
+                            if (isHabitCheckin) {
+                              ref.read(planEventsProvider.notifier).toggleComplete(event, date: item.date);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('已撤销该日的打卡记录'),
+                                  duration: Duration(milliseconds: 1500),
+                                ),
+                              );
+                            } else {
+                              ref.read(planEventsProvider.notifier).toggleComplete(event);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('已还原到任务列表'),
+                                  duration: Duration(milliseconds: 1500),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                        if (!isHabitCheckin) // Only allow hard delete for normal tasks here
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            tooltip: '永久删除',
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('删除记录'),
+                                  content: const Text('确定要永久删除这条已完成的记录吗？'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                                    TextButton(
+                                      onPressed: () {
+                                        ref.read(planEventsProvider.notifier).deleteEvent(event);
+                                        Navigator.pop(ctx);
+                                      },
+                                      child: const Text('删除'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-              ],
-            ),
-          ),
+              );
+            }),
+          ],
         );
       },
     );
@@ -330,7 +496,25 @@ class _HabitStreaksList extends ConsumerWidget {
                     ),
                     IconButton(
                       icon: Icon(Icons.delete, color: Theme.of(context).colorScheme.outline, size: 20),
-                      onPressed: () => ref.read(planEventsProvider.notifier).deleteEvent(habit),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('删除长期计划'),
+                            content: const Text('确定要删除这个长期计划吗？\n所有打卡记录将被一并清除且无法恢复。'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                              TextButton(
+                                onPressed: () {
+                                  ref.read(planEventsProvider.notifier).deleteEvent(habit);
+                                  Navigator.pop(ctx);
+                                },
+                                child: const Text('删除', style: TextStyle(color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -389,26 +573,48 @@ class _HabitStreaksList extends ConsumerWidget {
 
   bool _isCheckedToday(PlanEvent habit) {
     if (habit.streakDates == null || habit.streakDates!.isEmpty) return false;
-    final lastDate = habit.streakDates!.last;
     final now = DateTime.now();
-    return lastDate.year == now.year && 
-           lastDate.month == now.month && 
-           lastDate.day == now.day;
+    // Check if any date in the streak matches today's date
+    return habit.streakDates!.any((d) => 
+        d.year == now.year && 
+        d.month == now.month && 
+        d.day == now.day);
   }
 
   void _checkIn(WidgetRef ref, PlanEvent habit) {
     final now = DateTime.now();
+    final normalizedToday = DateTime(now.year, now.month, now.day);
+    
     final newDates = List<DateTime>.from(habit.streakDates ?? []);
-    newDates.add(now);
+    
+    // Check if already checked in today to prevent duplicates
+    final alreadyCheckedIn = newDates.any((d) => 
+        d.year == normalizedToday.year && 
+        d.month == normalizedToday.month && 
+        d.day == normalizedToday.day);
+        
+    if (alreadyCheckedIn) {
+      return; // Do nothing if already checked in
+    }
+
+    newDates.add(normalizedToday);
     
     // Sort dates just in case
     newDates.sort();
 
+    // Remove any existing duplicate dates that might have been added previously due to the bug
+    final uniqueDates = <DateTime>[];
+    final seenDates = <String>{};
+    for (var date in newDates) {
+      final key = '${date.year}-${date.month}-${date.day}';
+      if (!seenDates.contains(key)) {
+        seenDates.add(key);
+        uniqueDates.add(date);
+      }
+    }
+
     final updatedHabit = habit.copyWith(
-      streakDates: newDates,
-      // Also mark as completed for today? No, habits are perpetual.
-      // We don't change isCompleted flag for habits usually, or maybe toggle it daily?
-      // For simplicity, isCompleted is ignored for habits logic here.
+      streakDates: uniqueDates,
     );
     
     ref.read(planEventsProvider.notifier).updateEvent(updatedHabit);

@@ -72,74 +72,10 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
       return aTime.compareTo(bTime);
     });
 
-    // Unscheduled events for the drawer
-    final unscheduledEvents = allEvents.where((e) => e.startTime == null && !e.isCountdown).toList();
-
     const double hourHeight = 80.0;
     const double timeColumnWidth = 60.0;
 
     return Scaffold(
-      endDrawer: Drawer(
-        width: 300,
-        child: Column(
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer.withValues(alpha: 0.55),
-              ),
-              child: Center(
-                child: Text(
-                  '待办任务池',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: scheme.onPrimaryContainer),
-                ),
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: unscheduledEvents.length,
-                itemBuilder: (context, index) {
-                  final event = unscheduledEvents[index];
-                  return Draggable<PlanEvent>(
-                    data: event,
-                    feedback: SizedBox(
-                      width: 250,
-                      child: Card(
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(color: scheme.outline.withValues(alpha: 0.2)),
-                        ),
-                        color: _getEventColor(context, event).withValues(alpha: 0.9),
-                        child: ListTile(title: Text(event.title)),
-                      ),
-                    ),
-                    childWhenDragging: Opacity(
-                      opacity: 0.5,
-                      child: Card(
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(color: scheme.outline.withValues(alpha: 0.16)),
-                        ),
-                        child: ListTile(title: Text(event.title)),
-                      ),
-                    ),
-                    child: Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: scheme.outline.withValues(alpha: 0.2)),
-                      ),
-                      color: _getEventColor(context, event),
-                      child: ListTile(title: Text(event.title)),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -162,39 +98,32 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
                     },
                   ),
                   IconButton(
-                    icon: const Icon(Icons.calendar_month),
-                    tooltip: '打开日历',
-                    onPressed: () async {
-                      final pickedDate = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2030),
-                        locale: const Locale('zh', 'CN'),
+                  icon: const Icon(Icons.calendar_month),
+                  tooltip: '打开日历',
+                  onPressed: () async {
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                      locale: const Locale('zh', 'CN'),
+                    );
+                    
+                    if (pickedDate != null) {
+                      ref.read(selectedDateProvider.notifier).state = DateTime(
+                        pickedDate.year,
+                        pickedDate.month,
+                        pickedDate.day,
                       );
-                      
-                      if (pickedDate != null) {
-                        ref.read(selectedDateProvider.notifier).state = DateTime(
-                          pickedDate.year,
-                          pickedDate.month,
-                          pickedDate.day,
-                        );
-                      }
-                    },
-                  ),
-                  Builder(
-                    builder: (context) => IconButton(
-                      icon: const Icon(Icons.list_alt),
-                      tooltip: '待办任务池',
-                      onPressed: () => Scaffold.of(context).openEndDrawer(),
-                    ),
-                  ),
-                ],
-              ),
+                    }
+                  },
+                ),
+              ],
             ),
-            Expanded(
-              child: SingleChildScrollView(
-              child: SizedBox(
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+            child: SizedBox(
                 height: 24 * hourHeight,
                 child: Stack(
                   children: [
@@ -367,58 +296,89 @@ class _TimelineScreenState extends ConsumerState<TimelineScreen> {
                           ? '截止 ${DateFormat('MM-dd HH:mm').format(event.deadline!)}'
                           : timeRange;
                       final detailMaxLines = (event.isCountdown && !compactCountdown) ? 2 : 1;
+                    
+                      // Check completion status for current date if it's a habit
+                      bool isCompleted = event.isCompleted;
+                      if (event.isHabit && event.streakDates != null) {
+                        isCompleted = event.streakDates!.any((d) => 
+                            d.year == selectedDate.year && 
+                            d.month == selectedDate.month && 
+                            d.day == selectedDate.day);
+                      }
 
                       return Positioned(
                         top: top,
                         left: timeColumnWidth + 1, // Start after the vertical divider
                         right: 12, // Add some padding on the right
                         height: height,
-                        child: Container(
-                          margin: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: _getEventColor(context, event).withValues(alpha: 0.95),
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                event.title,
-                                style: TextStyle(
-                                  fontSize: 13, 
-                                  fontWeight: FontWeight.w600,
-                                  color: Theme.of(context).colorScheme.onSurface,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                        child: GestureDetector(
+                          onTap: () {
+                            // Tap to edit
+                            // _showEditEventDialog is not available in timeline_screen, skip for now or we can use ref
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _getEventColor(context, event).withValues(alpha: isCompleted ? 0.4 : 0.95),
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                )
+                              ],
+                              border: Border.all(
+                                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                                width: 1,
                               ),
-                              if (height >= 40)
-                                const SizedBox(height: 4),
-                              if (height >= 40)
-                                Expanded(
-                                  child: Text(
-                                    detailText,
-                                    maxLines: detailMaxLines,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    if (event.isHabit || event.isCountdown)
+                                      Padding(
+                                        padding: const EdgeInsets.only(right: 4.0),
+                                        child: Icon(
+                                          event.isCountdown ? Icons.timer : Icons.repeat,
+                                          size: 12,
+                                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: isCompleted ? 0.4 : 0.8),
+                                        ),
+                                      ),
+                                    Expanded(
+                                      child: Text(
+                                        event.title,
+                                        style: TextStyle(
+                                          fontSize: 13, 
+                                          fontWeight: FontWeight.w600,
+                                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: isCompleted ? 0.4 : 1.0),
+                                          decoration: isCompleted ? TextDecoration.lineThrough : null,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (height >= 40)
+                                  const SizedBox(height: 4),
+                                if (height >= 40)
+                                  Expanded(
+                                    child: Text(
+                                      detailText,
+                                      maxLines: detailMaxLines,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: isCompleted ? 0.3 : 0.75),
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       );

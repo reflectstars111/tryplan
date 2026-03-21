@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:smart_time_manager/models/plan_event.dart';
 import 'package:smart_time_manager/providers/plan_provider.dart';
 import 'package:smart_time_manager/services/ai_service.dart';
+import 'package:smart_time_manager/services/asr_service.dart';
 
 class AIPlanningScreen extends ConsumerStatefulWidget {
   const AIPlanningScreen({super.key});
@@ -18,11 +19,85 @@ class _AIPlanningScreenState extends ConsumerState<AIPlanningScreen> {
   final List<Map<String, String>> _messages = []; // {role: 'user' | 'ai', content: '...'}
   bool _isLoading = false;
   late final AIService _aiService;
+  
+  // Voice input state
+  final ASRService _asrService = ASRService();
+  bool _isRecording = false;
+  bool _isTranscribing = false;
 
   @override
   void initState() {
     super.initState();
     _aiService = AIService();
+  }
+  
+  Future<void> _toggleRecording() async {
+    if (_isTranscribing) return;
+
+    if (_isRecording) {
+      // Stop recording
+      setState(() {
+        _isRecording = false;
+        _isTranscribing = true;
+      });
+      
+      final text = await _asrService.stopAndRecognize();
+      
+      setState(() {
+        _isTranscribing = false;
+        if (text != null && text.isNotEmpty) {
+          // Append text instead of replacing and sending automatically
+          String current = _controller.text;
+          if (current.isNotEmpty && !current.endsWith(' ')) {
+            current += ' ';
+          }
+          _controller.text = current + text;
+          _controller.selection = TextSelection.fromPosition(
+            TextPosition(offset: _controller.text.length),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('未能识别到语音或识别失败'),
+              duration: Duration(milliseconds: 1500),
+            ),
+          );
+        }
+      });
+    } else {
+      // Start recording
+      final success = await _asrService.startListening();
+      if (success) {
+        setState(() {
+          _isRecording = true;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('已启动本地识别'),
+              duration: Duration(milliseconds: 1500),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          final detail = _asrService.lastError;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(detail != null && detail.isNotEmpty ? detail : '无法访问麦克风或启动录音失败'),
+              duration: const Duration(milliseconds: 1500),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _asrService.dispose();
+    _controller.dispose();
+    super.dispose();
   }
 
   void _sendMessage() async {
@@ -140,7 +215,10 @@ class _AIPlanningScreenState extends ConsumerState<AIPlanningScreen> {
                     }
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('已添加 ${eventsToAdd.length} 个日程')),
+                      SnackBar(
+                        content: Text('已添加 ${eventsToAdd.length} 个日程'),
+                        duration: const Duration(milliseconds: 1500),
+                      ),
                     );
                   },
                   child: const Text('确认添加'),
@@ -348,18 +426,50 @@ class _AIPlanningScreenState extends ConsumerState<AIPlanningScreen> {
               Expanded(
                 child: TextField(
                   controller: _controller,
-                  decoration: const InputDecoration(
-                    hintText: '输入您的规划需求...',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: InputDecoration(
+                    hintText: _isRecording ? '正在录音... (点击停止)' : (_isTranscribing ? '正在转文字...' : '输入您的规划需求...'),
+                    hintStyle: TextStyle(
+                      color: _isRecording ? Theme.of(context).colorScheme.error : (_isTranscribing ? Theme.of(context).colorScheme.primary : null),
+                      fontStyle: (_isRecording || _isTranscribing) ? FontStyle.italic : null,
+                    ),
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
                   onSubmitted: (_) => _sendMessage(),
                 ),
               ),
               const SizedBox(width: 8),
+              GestureDetector(
+                onTap: _toggleRecording,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isRecording 
+                        ? Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.45) 
+                        : (_isTranscribing
+                            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5)
+                            : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)),
+                  ),
+                  child: _isTranscribing
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.primary),
+                        )
+                      : Icon(
+                          _isRecording ? Icons.stop : Icons.mic_rounded,
+                          color: _isRecording ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.primary,
+                          size: 24,
+                        ),
+                ),
+              ),
+              const SizedBox(width: 4),
               IconButton(
                 icon: const Icon(Icons.send),
                 onPressed: _sendMessage,
+                color: Theme.of(context).colorScheme.primary,
               ),
             ],
           ),

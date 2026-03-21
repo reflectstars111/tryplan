@@ -4,6 +4,7 @@ import 'package:smart_time_manager/services/smart_parser.dart';
 import 'package:smart_time_manager/services/asr_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_time_manager/providers/plan_provider.dart';
+import 'package:smart_time_manager/providers/selected_date_provider.dart';
 import 'package:intl/intl.dart';
 
 class SmartInputBar extends ConsumerStatefulWidget {
@@ -53,7 +54,10 @@ class _SmartInputBarState extends ConsumerState<SmartInputBar> {
         });
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未能识别到语音或识别失败')),
+          const SnackBar(
+            content: Text('未能识别到语音或识别失败'),
+            duration: Duration(milliseconds: 1500),
+          ),
         );
       }
 
@@ -71,18 +75,27 @@ class _SmartInputBarState extends ConsumerState<SmartInputBar> {
         setState(() => _isRecording = true);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已启动本地识别')),
+            const SnackBar(
+              content: Text('已启动本地识别'),
+              duration: Duration(milliseconds: 1500),
+            ),
           );
         }
       } else if (mounted) {
         final detail = _asrService.lastError;
         if (detail != null && detail.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('语音识别启动失败：$detail')),
+            SnackBar(
+              content: Text('语音识别启动失败：$detail'),
+              duration: const Duration(milliseconds: 1500),
+            ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('语音识别启动失败')),
+            const SnackBar(
+              content: Text('语音识别启动失败'),
+              duration: Duration(milliseconds: 1500),
+            ),
           );
         }
       }
@@ -90,7 +103,10 @@ class _SmartInputBarState extends ConsumerState<SmartInputBar> {
       debugPrint('Recording error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('录音启动失败: $e')),
+          SnackBar(
+            content: Text('录音启动失败: $e'),
+            duration: const Duration(milliseconds: 1500),
+          ),
         );
       }
     }
@@ -235,17 +251,17 @@ class _SmartInputBarState extends ConsumerState<SmartInputBar> {
   }
 }
 
-class _ConfirmationSheet extends StatefulWidget {
+class _ConfirmationSheet extends ConsumerStatefulWidget {
   final PlanEvent initialEvent;
   final Function(PlanEvent) onConfirm;
 
   const _ConfirmationSheet({required this.initialEvent, required this.onConfirm});
 
   @override
-  State<_ConfirmationSheet> createState() => _ConfirmationSheetState();
+  ConsumerState<_ConfirmationSheet> createState() => _ConfirmationSheetState();
 }
 
-class _ConfirmationSheetState extends State<_ConfirmationSheet> {
+class _ConfirmationSheetState extends ConsumerState<_ConfirmationSheet> {
   late TextEditingController _titleController;
   late bool _isImportant;
   late bool _isUrgent;
@@ -258,8 +274,27 @@ class _ConfirmationSheetState extends State<_ConfirmationSheet> {
     _titleController = TextEditingController(text: widget.initialEvent.title);
     _isImportant = widget.initialEvent.isImportant;
     _isUrgent = widget.initialEvent.isUrgent;
-    _startTime = widget.initialEvent.startTime;
-    _endTime = widget.initialEvent.endTime ?? _startTime?.add(const Duration(hours: 1));
+    
+    // Set default time to selectedDate's 00:00 if no time was parsed
+    if (widget.initialEvent.startTime == null) {
+      // Need to defer this slightly as ref.read shouldn't be called directly in initState 
+      // without using the current provider's state properly, but since this is just 
+      // reading a static value, we can do it in didChangeDependencies or directly in build.
+      // We will handle it in didChangeDependencies to ensure safe access to ref.
+    } else {
+      _startTime = widget.initialEvent.startTime;
+      _endTime = widget.initialEvent.endTime ?? _startTime?.add(const Duration(hours: 1));
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_startTime == null && widget.initialEvent.startTime == null) {
+      final selectedDate = ref.read(selectedDateProvider);
+      _startTime = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, 0, 0);
+      _endTime = _startTime!.add(const Duration(hours: 1));
+    }
   }
 
   @override

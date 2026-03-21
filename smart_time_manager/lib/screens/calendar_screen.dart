@@ -424,12 +424,22 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   Widget _buildEventList(List<PlanEvent> events, DateTime selectedDay) {
     // Only show active (uncompleted) tasks
     final selectedEvents = events.where((e) {
-      if (e.isCompleted) return false;
       if (e.startTime == null && !e.isCountdown) return false;
 
       final selected = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
+      
+      // Check completion status for the specific date if habit
+      bool isCompletedForDate = e.isCompleted;
+      if (e.isHabit && e.streakDates != null) {
+        isCompletedForDate = e.streakDates!.any((d) => 
+            d.year == selected.year && 
+            d.month == selected.month && 
+            d.day == selected.day);
+      }
+      
+      if (isCompletedForDate) return false;
 
       if (e.isCountdown && e.deadline != null) {
         final deadlineDay = DateTime(e.deadline!.year, e.deadline!.month, e.deadline!.day);

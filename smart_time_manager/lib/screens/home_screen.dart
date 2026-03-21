@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_time_manager/models/plan_event.dart';
 import 'package:smart_time_manager/providers/plan_provider.dart';
 import 'package:smart_time_manager/providers/reminder_settings_provider.dart';
-import 'package:smart_time_manager/providers/theme_mode_provider.dart';
 import 'package:smart_time_manager/screens/quadrant_screen.dart';
 import 'package:smart_time_manager/screens/calendar_screen.dart';
 import 'package:smart_time_manager/screens/timeline_screen.dart';
@@ -61,46 +60,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     });
 
-    final themeMode = ref.watch(appThemeModeProvider);
+    // We only need to listen to changes that affect the app bar or bottom nav, 
+    // the theme is handled at the MaterialApp level.
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: PopupMenuButton<ThemeMode>(
-                      tooltip: '外观模式',
-                      icon: Icon(themeMode == ThemeMode.dark ? Icons.dark_mode : Icons.light_mode),
-                      onSelected: (mode) {
-                        ref.read(appThemeModeProvider.notifier).setThemeMode(mode);
-                      },
-                      itemBuilder: (context) => [
-                        CheckedPopupMenuItem(
-                          value: ThemeMode.light,
-                          checked: themeMode == ThemeMode.light,
-                          child: const Text('浅色模式'),
-                        ),
-                        CheckedPopupMenuItem(
-                          value: ThemeMode.dark,
-                          checked: themeMode == ThemeMode.dark,
-                          child: const Text('深色模式'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 220),

@@ -5,6 +5,7 @@ import 'package:smart_time_manager/providers/plan_provider.dart';
 import 'package:smart_time_manager/providers/reminder_settings_provider.dart';
 import 'package:smart_time_manager/providers/selected_date_provider.dart';
 import 'package:smart_time_manager/widgets/date_strip_widget.dart';
+import 'package:smart_time_manager/providers/theme_mode_provider.dart';
 import 'package:intl/intl.dart';
 
 class QuadrantScreen extends ConsumerWidget {
@@ -19,7 +20,9 @@ class QuadrantScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final allEvents = ref.watch(planEventsProvider);
     final selectedDate = ref.watch(selectedDateProvider);
+    final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final themeMode = ref.watch(appThemeModeProvider);
 
     final quadrantEvents = allEvents.where((e) {
       if (e.isCountdown) {
@@ -69,33 +72,71 @@ class QuadrantScreen extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.today),
-                    tooltip: '回到今天',
-                    onPressed: () {
-                      final now = DateTime.now();
-                      ref.read(selectedDateProvider.notifier).state = DateTime(
-                        now.year,
-                        now.month,
-                        now.day,
-                      );
-                    },
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Material(
+                        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(20),
+                        child: PopupMenuButton<ThemeMode>(
+                          icon: Icon(
+                            themeMode == ThemeMode.light ? Icons.light_mode : Icons.dark_mode,
+                            color: scheme.primary,
+                          ),
+                          tooltip: '外观设置',
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          onSelected: (mode) {
+                            ref.read(appThemeModeProvider.notifier).setThemeMode(mode);
+                          },
+                          itemBuilder: (context) => [
+                            CheckedPopupMenuItem(
+                              value: ThemeMode.light,
+                              checked: themeMode == ThemeMode.light,
+                              child: const Text('浅色模式'),
+                            ),
+                            CheckedPopupMenuItem(
+                              value: ThemeMode.dark,
+                              checked: themeMode == ThemeMode.dark,
+                              child: const Text('深色模式'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.notifications_none),
+                        tooltip: '提醒设置',
+                        onPressed: () => _showReminderSettingsDialog(context),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        tooltip: '添加事项',
+                        onPressed: () => _showAddEventDialog(context, ref),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.calendar_month),
-                    tooltip: '打开日历',
-                    onPressed: () => _showDatePicker(context, ref, selectedDate),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.notifications_none),
-                    tooltip: '提醒设置',
-                    onPressed: () => _showReminderSettingsDialog(context),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: () => _showAddEventDialog(context, ref),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.today),
+                        tooltip: '回到今天',
+                        onPressed: () {
+                          final now = DateTime.now();
+                          ref.read(selectedDateProvider.notifier).state = DateTime(
+                            now.year,
+                            now.month,
+                            now.day,
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.calendar_month),
+                        tooltip: '打开日历',
+                        onPressed: () => _showDatePicker(context, ref, selectedDate),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -919,6 +960,16 @@ class _QuadrantCellState extends ConsumerState<_QuadrantCell> {
   Widget _buildEventCard(PlanEvent event, String timeRange) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Check if completed for current date if it's a habit
+    final selectedDate = ref.watch(selectedDateProvider);
+    bool isCompleted = event.isCompleted;
+    if (event.isHabit && event.streakDates != null) {
+      isCompleted = event.streakDates!.any((d) => 
+          d.year == selectedDate.year && 
+          d.month == selectedDate.month && 
+          d.day == selectedDate.day);
+    }
 
     return Card(
       elevation: isDark ? 0 : 2,
@@ -943,12 +994,12 @@ class _QuadrantCellState extends ConsumerState<_QuadrantCell> {
                   height: 24,
                   width: 24,
                   child: Checkbox(
-                    value: event.isCompleted,
+                    value: isCompleted,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     side: BorderSide(color: scheme.outline.withValues(alpha: 0.4), width: 1.5),
                     onChanged: (val) {
                       // Toggle complete status
-                      ref.read(planEventsProvider.notifier).toggleComplete(event);
+                      ref.read(planEventsProvider.notifier).toggleComplete(event, date: event.isHabit ? selectedDate : null);
                     },
                     activeColor: scheme.primary, // Green for complete
                   ),
@@ -962,8 +1013,8 @@ class _QuadrantCellState extends ConsumerState<_QuadrantCell> {
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
-                        color: event.isCompleted ? scheme.onSurface.withValues(alpha: 0.4) : scheme.onSurface.withValues(alpha: 0.9),
-                        decoration: event.isCompleted ? TextDecoration.lineThrough : null,
+                        color: isCompleted ? scheme.onSurface.withValues(alpha: 0.4) : scheme.onSurface.withValues(alpha: 0.9),
+                        decoration: isCompleted ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ),

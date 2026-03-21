@@ -30,9 +30,41 @@ class PlanEventsNotifier extends StateNotifier<List<PlanEvent>> {
     state = _box.values.toList();
   }
 
-  Future<void> toggleComplete(PlanEvent event) async {
-    final updatedEvent = event.copyWith(isCompleted: !event.isCompleted);
-    await _box.put(updatedEvent.id, updatedEvent);
-    state = _box.values.toList();
+  Future<void> toggleComplete(PlanEvent event, {DateTime? date}) async {
+    if (event.isHabit && date != null) {
+      // Create a normalized date for the key
+      final normalizedDate = DateTime(date.year, date.month, date.day);
+      
+      // Initialize streakDates if null
+      List<DateTime> updatedStreakDates = event.streakDates != null 
+          ? List<DateTime>.from(event.streakDates!) 
+          : [];
+          
+      // Check if the date is already in the streak
+      bool isCompletedOnDate = updatedStreakDates.any((d) => 
+          d.year == normalizedDate.year && 
+          d.month == normalizedDate.month && 
+          d.day == normalizedDate.day);
+          
+      if (isCompletedOnDate) {
+        // Remove from streak
+        updatedStreakDates.removeWhere((d) => 
+            d.year == normalizedDate.year && 
+            d.month == normalizedDate.month && 
+            d.day == normalizedDate.day);
+      } else {
+        // Add to streak
+        updatedStreakDates.add(normalizedDate);
+      }
+      
+      final updatedEvent = event.copyWith(streakDates: updatedStreakDates);
+      await _box.put(updatedEvent.id, updatedEvent);
+      state = _box.values.toList();
+    } else {
+      // Normal event logic
+      final updatedEvent = event.copyWith(isCompleted: !event.isCompleted);
+      await _box.put(updatedEvent.id, updatedEvent);
+      state = _box.values.toList();
+    }
   }
 }
